@@ -27,6 +27,14 @@ import { logStore } from '~/lib/stores/logs';
 import { streamingState } from '~/lib/stores/streaming';
 import { filesToArtifacts } from '~/utils/fileUtils';
 import { supabaseConnection } from '~/lib/stores/supabase';
+import React, { useImperativeHandle, forwardRef } from 'react';
+
+type ExternalSendMessageOptions = {
+  model?: string;
+  provider?: ProviderInfo;
+  input?: string;
+  imageDataList?: string[];
+};
 
 const toastAnimation = cssTransition({
   enter: 'animated fadeInRight',
@@ -36,6 +44,7 @@ const toastAnimation = cssTransition({
 const logger = createScopedLogger('Chat');
 
 export function Chat() {
+  const chatRef = useRef<any>(null);
   renderLogger.trace('Chat');
 
   const { ready, initialMessages, storeMessageHistory, importChat, exportChat } = useChatHistory();
@@ -44,10 +53,31 @@ export function Chat() {
     workbenchStore.setReloadedMessages(initialMessages.map((m) => m.id));
   }, [initialMessages]);
 
+  // 轮询外部接口
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/external-send');
+
+        if (res.ok) {
+          const json = (await res.json()) as { data?: any };
+
+          if (json && json.data) {
+            chatRef.current?.externalSendMessage(json.data);
+          }
+        }
+      } catch (e) {
+        // 可加日志
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <>
       {ready && (
         <ChatImpl
+          ref={chatRef}
           description={title}
           initialMessages={initialMessages}
           exportChat={exportChat}
@@ -114,11 +144,11 @@ interface ChatProps {
 }
 
 export const ChatImpl = memo(
-  ({ description, initialMessages, storeMessageHistory, importChat, exportChat }: ChatProps) => {
+  forwardRef<any, ChatProps>((props, ref) => {
     useShortcuts();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
+    const [chatStarted, setChatStarted] = useState(props.initialMessages.length > 0);
     const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
     const [imageDataList, setImageDataList] = useState<string[]>([]);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -189,7 +219,7 @@ export const ChatImpl = memo(
           'There was an error processing your request: ' + (e.message ? e.message : 'No details were returned'),
         );
       },
-      onFinish: (message, response) => {
+      onFinish: async (message, response) => {
         const usage = response.usage;
         setData(undefined);
 
@@ -206,8 +236,120 @@ export const ChatImpl = memo(
         }
 
         logger.debug('Finished streaming');
+
+        const downloadedFileName = await workbenchStore.downloadZip();
+        logger.debug('Finished downloading zip');
+
+        // 删除页面中的无用元素
+        const removeTargetElements = () => {
+          if (typeof window === 'undefined') {
+            return;
+          } // 确保只在浏览器中执行
+
+          // 1. 删除 header 元素
+          const header = document.querySelector(
+            '#root > .bg-bolt-elements-background-depth-1 > header.flex.items-center.p-5.border-b',
+          );
+
+          if (header) {
+            header.remove();
+          }
+
+          // 2. 删除 side-menu 侧边菜单
+          const sideMenu = document.querySelector('#root ._BaseChat_15kx3_1 .side-menu');
+
+          if (sideMenu) {
+            sideMenu.remove();
+          }
+
+          // 3. 删除聊天内容主区域
+          const chatMain = document.querySelector(
+            '#root ._BaseChat_15kx3_1 .flex.flex-col.lg\\:flex-row ._Chat_15kx3_5',
+          );
+
+          if (chatMain) {
+            chatMain.remove();
+          }
+
+          // 4. 删除workbench区域下的特定元素
+          const workbenchElement = document.querySelector(
+            '#root .z-workbench .fixed.top-\\[calc\\(var\\(--header-height\\)\\+1\\.5rem\\)\\] .absolute.inset-0 .h-full.flex.flex-col .flex.items-center.px-3.py-2.border-b',
+          );
+
+          if (workbenchElement) {
+            workbenchElement.remove();
+          }
+
+          // 5. 删除workbench区域下与第四个元素同级的另一个元素
+          const workbenchElement2 = document.querySelector(
+            '#root .z-workbench .relative.flex-1.overflow-hidden .absolute.inset-0 .w-full.h-full.flex.flex-col .bg-bolt-elements-background-depth-2.p-2.flex.items-center.gap-2',
+          );
+
+          if (workbenchElement2) {
+            workbenchElement2.remove();
+          }
+        };
+
+        /*
+         * 调用删除函数
+         * removeTargetElements();
+         */
+
+        // 构建查询参数
+        const queryParams = new URLSearchParams();
+
+        if (downloadedFileName) {
+          queryParams.append('fileName', downloadedFileName);
+        }
+
+        fetch(`/api/vali?${queryParams.toString()}`)
+          .then((response) => {
+            if (response.ok) {
+              return response.json();
+            }
+
+            throw new Error(`HTTP error! status: ${response.status}`);
+          })
+          .then((data: any) => {
+            console.log('Validation API response:', data);
+
+            // 根据后端返回的message字段进行处理
+            if (data.message === 'success') {
+              // 显示成功弹窗
+              toast.success('Successfully generated!');
+            } else if (data.message === 'continue') {
+              // 向外部接口发送POST请求
+              fetch('http://localhost:5173/api/external-send', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'gemini-2.5-flash',
+                  provider: {
+                    name: 'Google',
+                  },
+                  input: data.result,
+                  imageDataList: [],
+                }),
+              })
+                .then((response) => {
+                  if (response.ok) {
+                    console.log('External send request successful');
+                  } else {
+                    console.error('External send request failed:', response.status);
+                  }
+                })
+                .catch((error) => {
+                  console.error('Failed to send external request:', error);
+                });
+            }
+          })
+          .catch((error) => {
+            console.log('Failed to call validation API:', error);
+          });
       },
-      initialMessages,
+      initialMessages: props.initialMessages,
       initialInput: Cookies.get(PROMPT_COOKIE_KEY) || '',
     });
     useEffect(() => {
@@ -236,18 +378,18 @@ export const ChatImpl = memo(
     const TEXTAREA_MAX_HEIGHT = chatStarted ? 400 : 200;
 
     useEffect(() => {
-      chatStore.setKey('started', initialMessages.length > 0);
-    }, []);
+      chatStore.setKey('started', props.initialMessages.length > 0);
+    }, [props.initialMessages]);
 
     useEffect(() => {
       processSampledMessages({
         messages,
-        initialMessages,
+        initialMessages: props.initialMessages,
         isLoading,
         parseMessages,
-        storeMessageHistory,
+        storeMessageHistory: props.storeMessageHistory,
       });
-    }, [messages, isLoading, parseMessages]);
+    }, [messages, isLoading, parseMessages, props.initialMessages, props.storeMessageHistory]);
 
     const scrollTextArea = () => {
       const textarea = textareaRef.current;
@@ -298,8 +440,17 @@ export const ChatImpl = memo(
       setChatStarted(true);
     };
 
-    const sendMessage = async (_event: React.UIEvent, messageInput?: string) => {
+    const sendMessage = async (
+      _event: React.UIEvent,
+      messageInput?: string,
+      override?: { model?: string; provider?: ProviderInfo; imageDataList?: string[] },
+    ) => {
       const messageContent = messageInput || input;
+
+      // 优先用 override 里的值，否则用 state
+      const usedModel = override?.model ?? model;
+      const usedProvider = override?.provider ?? provider;
+      const usedImageDataList = override?.imageDataList ?? imageDataList;
 
       if (!messageContent?.trim()) {
         return;
@@ -321,8 +472,8 @@ export const ChatImpl = memo(
         if (autoSelectTemplate) {
           const { template, title } = await selectStarterTemplate({
             message: finalMessageContent,
-            model,
-            provider,
+            model: usedModel,
+            provider: usedProvider,
           });
 
           if (template !== 'blank') {
@@ -345,9 +496,9 @@ export const ChatImpl = memo(
                   content: [
                     {
                       type: 'text',
-                      text: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`,
+                      text: `[Model: ${usedModel}]\n\n[Provider: ${usedProvider.name}]\n\n${finalMessageContent}`,
                     },
-                    ...imageDataList.map((imageData) => ({
+                    ...(usedImageDataList || []).map((imageData) => ({
                       type: 'image',
                       image: imageData,
                     })),
@@ -361,7 +512,7 @@ export const ChatImpl = memo(
                 {
                   id: `3-${new Date().getTime()}`,
                   role: 'user',
-                  content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${userMessage}`,
+                  content: `[Model: ${usedModel}]\n\n[Provider: ${usedProvider.name}]\n\n${userMessage}`,
                   annotations: ['hidden'],
                 },
               ]);
@@ -390,9 +541,9 @@ export const ChatImpl = memo(
             content: [
               {
                 type: 'text',
-                text: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`,
+                text: `[Model: ${usedModel}]\n\n[Provider: ${usedProvider.name}]\n\n${finalMessageContent}`,
               },
-              ...imageDataList.map((imageData) => ({
+              ...(usedImageDataList || []).map((imageData) => ({
                 type: 'image',
                 image: imageData,
               })),
@@ -429,9 +580,9 @@ export const ChatImpl = memo(
           content: [
             {
               type: 'text',
-              text: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${userUpdateArtifact}${finalMessageContent}`,
+              text: `[Model: ${usedModel}]\n\n[Provider: ${usedProvider.name}]\n\n${userUpdateArtifact}${finalMessageContent}`,
             },
-            ...imageDataList.map((imageData) => ({
+            ...(usedImageDataList || []).map((imageData) => ({
               type: 'image',
               image: imageData,
             })),
@@ -445,9 +596,9 @@ export const ChatImpl = memo(
           content: [
             {
               type: 'text',
-              text: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${finalMessageContent}`,
+              text: `[Model: ${usedModel}]\n\n[Provider: ${usedProvider.name}]\n\n${finalMessageContent}`,
             },
-            ...imageDataList.map((imageData) => ({
+            ...(usedImageDataList || []).map((imageData) => ({
               type: 'image',
               image: imageData,
             })),
@@ -504,6 +655,42 @@ export const ChatImpl = memo(
       Cookies.set('selectedProvider', newProvider.name, { expires: 30 });
     };
 
+    // 暴露方法给外部
+    useImperativeHandle(ref, () => ({
+      /**
+       * 允许外部控制 model、provider、input、imageDataList，并安全调用 sendMessage
+       */
+      externalSendMessage: (options: ExternalSendMessageOptions = {}) => {
+        if (options.model) {
+          setModel(options.model);
+        }
+
+        if (options.provider) {
+          setProvider(options.provider);
+        }
+
+        if (options.input !== undefined) {
+          setInput(options.input);
+        }
+
+        if (options.imageDataList) {
+          setImageDataList(options.imageDataList);
+        }
+
+        // 延迟更久，确保 useState 已同步
+        setTimeout(() => {
+          sendMessage(null as any, options.input ?? input, {
+            model: options.model,
+            provider: options.provider,
+            imageDataList: options.imageDataList,
+          });
+        }, 100);
+      },
+      focusInput: () => {
+        textareaRef.current?.focus();
+      },
+    }));
+
     return (
       <BaseChat
         ref={animationScope}
@@ -528,9 +715,9 @@ export const ChatImpl = memo(
           debouncedCachePrompt(e);
         }}
         handleStop={abort}
-        description={description}
-        importChat={importChat}
-        exportChat={exportChat}
+        description={props.description}
+        importChat={props.importChat}
+        exportChat={props.exportChat}
         messages={messages.map((message, i) => {
           if (message.role === 'user') {
             return message;
@@ -566,5 +753,5 @@ export const ChatImpl = memo(
         data={chatData}
       />
     );
-  },
+  }),
 );

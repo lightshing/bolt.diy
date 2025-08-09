@@ -145,6 +145,23 @@ export class PreviewsStore {
     // Listen for server ready events
     webcontainer.on('server-ready', (port, url) => {
       console.log('[Preview] Server ready on port:', port, url);
+
+      /*
+       * fetch('http://127.0.0.1:5000/vali')
+       *   .then((response) => {
+       *     if (response.ok) {
+       *       return response.json();
+       *     }
+       *
+       *     throw new Error(`HTTP error! status: ${response.status}`);
+       *   })
+       *   .then((data) => {
+       *     console.log('Validation API response:', data);
+       *   })
+       *   .catch((error) => {
+       *     console.log('Failed to call validation API:', error);
+       *   });
+       */
       this.broadcastUpdate(url);
 
       // Initial storage sync when preview is ready

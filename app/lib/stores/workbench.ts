@@ -636,7 +636,10 @@ export class WorkbenchStore {
 
     // Generate the zip file and save it
     const content = await zip.generateAsync({ type: 'blob' });
-    saveAs(content, `${uniqueProjectName}.zip`);
+    const fileName = `${uniqueProjectName}.zip`;
+    saveAs(content, fileName);
+
+    return fileName;
   }
 
   async syncFiles(targetHandle: FileSystemDirectoryHandle) {

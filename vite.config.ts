@@ -73,6 +73,15 @@ const gitInfo = getGitInfo();
 
 export default defineConfig((config) => {
   return {
+    server: {
+      proxy: {
+        '/api/vali': {
+          target: 'http://127.0.0.1:5000',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/vali/, '/vali'),
+        },
+      },
+    },
     define: {
       __COMMIT_HASH: JSON.stringify(gitInfo.commitHash),
       __GIT_BRANCH: JSON.stringify(gitInfo.branch),
