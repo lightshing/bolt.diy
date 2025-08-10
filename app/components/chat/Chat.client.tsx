@@ -317,7 +317,7 @@ export const ChatImpl = memo(
             if (data.message === 'success') {
               // 显示成功弹窗
               toast.success('Successfully generated!');
-            } else if (data.message === 'continue') {
+            } else {
               // 向外部接口发送POST请求
               fetch('http://localhost:5173/api/external-send', {
                 method: 'POST',
