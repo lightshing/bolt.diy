@@ -237,6 +237,9 @@ export const ChatImpl = memo(
 
         logger.debug('Finished streaming');
 
+        // 延迟6秒再进行下载
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+
         const downloadedFileName = await workbenchStore.downloadZip();
         logger.debug('Finished downloading zip');
 
@@ -317,6 +320,9 @@ export const ChatImpl = memo(
             if (data.message === 'success') {
               // 显示成功弹窗
               toast.success('Successfully generated!');
+            } else if (data.message === 'error') {
+              // 显示错误弹窗，包含详细错误信息
+              toast.error(`Error: ${data.result}`);
             } else {
               // 向外部接口发送POST请求
               fetch('http://localhost:5173/api/external-send', {
@@ -325,9 +331,9 @@ export const ChatImpl = memo(
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  model: 'gemini-2.5-flash',
+                  model: data.model,
                   provider: {
-                    name: 'Google',
+                    name: data.provider,
                   },
                   input: data.result,
                   imageDataList: [],
