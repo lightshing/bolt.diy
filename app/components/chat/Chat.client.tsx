@@ -63,6 +63,13 @@ export function Chat() {
           const json = (await res.json()) as { data?: any };
 
           if (json && json.data) {
+            // 检查是否有reset字段且为true
+            if (json.data.reset === true) {
+              // 重定向到指定URL
+              window.location.href = 'http://localhost:5173';
+              return;
+            }
+            
             chatRef.current?.externalSendMessage(json.data);
           }
         }
