@@ -69,7 +69,7 @@ export function Chat() {
               window.location.href = 'http://localhost:5173';
               return;
             }
-            
+
             chatRef.current?.externalSendMessage(json.data);
           }
         }
@@ -244,8 +244,68 @@ export const ChatImpl = memo(
 
         logger.debug('Finished streaming');
 
-        // 延迟6秒再进行下载
-        await new Promise((resolve) => setTimeout(resolve, 6000));
+        // 延迟20秒再进行下载
+        await new Promise((resolve) => setTimeout(resolve, 20000));
+
+        // 检查是否存在Ask Bolt按钮
+        const checkAndClickAskBolt = () => {
+          if (typeof window === 'undefined') {
+            return false;
+          }
+
+          // 查找Ask Bolt按钮 - 通过多种方式识别
+          const askBoltButtons = Array.from(document.querySelectorAll('button')).filter((button) => {
+            const text = button.textContent?.trim();
+
+            // 检查文本内容
+            if (text !== 'Ask Bolt') {
+              return false;
+            }
+
+            // 检查是否有聊天图标（多种可能的选择器）
+            const hasIcon =
+              button.querySelector('.i-ph\\:chat-circle-duotone') ||
+              button.querySelector('[class*="chat-circle"]') ||
+              button.querySelector('div[class*="i-ph"]');
+
+            return !!hasIcon;
+          });
+
+          if (askBoltButtons.length > 0) {
+            logger.debug('Found Ask Bolt button, clicking it...');
+
+            const askBoltButton = askBoltButtons[0] as HTMLButtonElement;
+
+            // 确保按钮可见且可点击
+            if (askBoltButton.offsetParent !== null && !askBoltButton.disabled) {
+              askBoltButton.click();
+
+              // 显示toast通知
+              toast.info('🤖Auto click Ask Bolt button...', {
+                position: 'bottom-right',
+                autoClose: 3000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+              });
+
+              return true;
+            } else {
+              logger.debug('Ask Bolt button found but not clickable');
+            }
+          }
+
+          return false;
+        };
+
+        // 检查并点击Ask Bolt按钮
+        const askBoltClicked = checkAndClickAskBolt();
+
+        if (askBoltClicked) {
+          logger.debug('Ask Bolt button clicked, skipping download and API call');
+          return;
+        }
 
         const downloadedFileName = await workbenchStore.downloadZip();
         logger.debug('Finished downloading zip');
